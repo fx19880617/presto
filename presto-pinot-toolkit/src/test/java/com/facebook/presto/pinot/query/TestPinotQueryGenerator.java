@@ -32,6 +32,7 @@ import org.testng.annotations.Test;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Optional;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -129,6 +130,52 @@ public class TestPinotQueryGenerator
     public void testCountStar()
     {
         testUnaryAggregationHelper((planBuilder, aggregationBuilder) -> aggregationBuilder.addAggregation(planBuilder.variable("agg"), getRowExpression("count(*)", defaultSessionHolder)), "count(*)");
+    }
+
+    @Test
+    public void testDistinctCountPushdown()
+    {
+        PlanNode justScan = buildPlan(planBuilder -> tableScan(planBuilder, pinotTable, regionId, secondsSinceEpoch, city, fare));
+        PlanNode distinctAggregation = buildPlan(planBuilder -> planBuilder.aggregation(aggBuilder -> aggBuilder.source(justScan).singleGroupingSet(v("regionid"))));
+        testPQL(planBuilder -> planBuilder.aggregation(aggBuilder -> aggBuilder.source(distinctAggregation).globalGrouping().addAggregation(v("count_regionid"), getRowExpression("count(regionid)", defaultSessionHolder))),
+                "SELECT DISTINCTCOUNT(regionId) FROM realtimeOnly");
+    }
+
+    @Test
+    public void testDistinctCountGroupByPushdown()
+    {
+        PlanNode justScan = buildPlan(planBuilder -> tableScan(planBuilder, pinotTable, regionId, secondsSinceEpoch, city, fare));
+        PlanNode distinctAggregation = buildPlan(planBuilder -> planBuilder.aggregation(aggBuilder -> aggBuilder.source(justScan).singleGroupingSet(v("city"), v("regionid"))));
+        testPQL(planBuilder -> planBuilder.aggregation(aggBuilder -> aggBuilder.source(distinctAggregation).singleGroupingSet(v("city")).addAggregation(v("count_regionid"), getRowExpression("count(regionid)", defaultSessionHolder))),
+                "SELECT DISTINCTCOUNT(regionId) FROM realtimeOnly GROUP BY city TOP 10000");
+    }
+
+    @Test
+    public void testDistinctCountWithOtherAggregationPushdown()
+    {
+        Map<String, String> outputVariables = ImmutableMap.of("agg", "count(*)", "count(regionid)", "DISTINCTCOUNT(regionId)");
+        PlanNode justScan = buildPlan(planBuilder -> tableScan(planBuilder, pinotTable, regionId, secondsSinceEpoch, city, fare));
+        PlanNode markDistinct = buildPlan(planBuilder -> markDistinct(planBuilder, v("regionid$distinct"), ImmutableList.of(v("regionid")), justScan));
+        testPQL(
+                new PinotConfig().setAllowMultipleAggregations(true),
+                planBuilder -> planBuilder.aggregation(aggBuilder -> aggBuilder.source(markDistinct).addAggregation(planBuilder.variable("agg"), getRowExpression("count(*)", defaultSessionHolder)).addAggregation(planBuilder.variable("count(regionid)"), getRowExpression("count(regionid)", defaultSessionHolder), Optional.empty(), Optional.empty(), false, Optional.of(v("regionid$distinct"))).globalGrouping()),
+                "SELECT __expressions__ FROM realtimeOnly",
+                defaultSessionHolder,
+                outputVariables);
+    }
+
+    @Test
+    public void testDistinctCountWithOtherAggregationGroupByPushdown()
+    {
+        Map<String, String> outputVariables = ImmutableMap.of("agg", "count(*)", "count(regionid)", "DISTINCTCOUNT(regionId)");
+        PlanNode justScan = buildPlan(planBuilder -> tableScan(planBuilder, pinotTable, regionId, secondsSinceEpoch, city, fare));
+        PlanNode markDistinct = buildPlan(planBuilder -> markDistinct(planBuilder, v("regionid$distinct"), ImmutableList.of(v("regionid")), justScan));
+        testPQL(
+                new PinotConfig().setAllowMultipleAggregations(true),
+                planBuilder -> planBuilder.aggregation(aggBuilder -> aggBuilder.source(markDistinct).singleGroupingSet(v("city")).addAggregation(planBuilder.variable("agg"), getRowExpression("count(*)", defaultSessionHolder)).addAggregation(planBuilder.variable("count(regionid)"), getRowExpression("count(regionid)", defaultSessionHolder), Optional.empty(), Optional.empty(), false, Optional.of(v("regionid$distinct")))),
+                "SELECT __expressions__ FROM realtimeOnly GROUP BY city TOP 10000",
+                defaultSessionHolder,
+                outputVariables);
     }
 
     @Test

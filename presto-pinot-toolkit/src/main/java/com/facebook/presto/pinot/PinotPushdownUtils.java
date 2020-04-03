@@ -18,6 +18,7 @@ import com.facebook.presto.spi.plan.AggregationNode;
 import com.facebook.presto.spi.plan.TopNNode;
 import com.facebook.presto.spi.relation.CallExpression;
 import com.facebook.presto.spi.relation.ConstantExpression;
+import com.facebook.presto.spi.relation.RowExpression;
 import com.facebook.presto.spi.relation.VariableReferenceExpression;
 import com.facebook.presto.spi.type.BigintType;
 import com.facebook.presto.spi.type.BooleanType;
@@ -36,9 +37,11 @@ import io.airlift.slice.Slice;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.math.MathContext;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import static com.facebook.presto.pinot.PinotErrorCode.PINOT_UNSUPPORTED_EXPRESSION;
 import static com.facebook.presto.spi.type.Decimals.decodeUnscaledValue;
@@ -48,6 +51,10 @@ import static java.lang.String.format;
 
 public class PinotPushdownUtils
 {
+    public static final String DISTINCT_COUNT_FUNCTION_NAME = "distinctCount";
+    private static final String COUNT_FUNCTION_NAME = "count";
+    private static final String DISTINCT_MASK = "$distinct";
+
     private PinotPushdownUtils() {}
 
     public enum ExpressionType
@@ -147,9 +154,24 @@ public class PinotPushdownUtils
             if (agg != null) {
                 if (agg.getFilter().isPresent()
                         || agg.isDistinct()
-                        || agg.getOrderBy().isPresent()
-                        || agg.getMask().isPresent()) {
+                        || agg.getOrderBy().isPresent()) {
                     throw new PinotException(PINOT_UNSUPPORTED_EXPRESSION, Optional.empty(), "Unsupported aggregation node " + aggregationNode);
+                }
+                if (agg.getMask().isPresent()) {
+                    /**
+                     * This if-block handles the case of pushing down distinct count as one of the aggregation expression along with other aggregation functions.
+                     * E.g. `SELECT count(distinct COL_A), sum(COL_B) FROM (SELECT COL_A, COL_B FROM myTable)` to Pinot as `SELECT distinctCount(COL_A), sum(COL_B) FROM myTable`
+                     *
+                     */
+                    if (agg.getCall().getDisplayName().equalsIgnoreCase(COUNT_FUNCTION_NAME) && agg.getMask().get().getName().equalsIgnoreCase(agg.getArguments().get(0) + DISTINCT_MASK)) {
+                        nodeBuilder.add(new AggregationFunctionColumnNode(outputColumn, new CallExpression(DISTINCT_COUNT_FUNCTION_NAME, agg.getCall().getFunctionHandle(), agg.getCall().getType(), agg.getCall().getArguments())));
+                        continue;
+                    }
+                    // Pinot doesn't support push down aggregation functions other than count on top of distinct function.
+                    throw new PinotException(PINOT_UNSUPPORTED_EXPRESSION, Optional.empty(), "Unsupported aggregation node " + aggregationNode);
+                }
+                if (handlePushDownSingleDistinctCount(nodeBuilder, aggregationNode, outputColumn, agg)) {
+                    continue;
                 }
                 nodeBuilder.add(new AggregationFunctionColumnNode(outputColumn, agg.getCall()));
             }
@@ -161,6 +183,56 @@ public class PinotPushdownUtils
             }
         }
         return nodeBuilder.build();
+    }
+
+    /**
+     * Try to push down query like: `SELECT count(distinct $COLUMN) FROM myTable` to Pinot as `SELECT distinctCount($COLUMN) FROM myTable`.
+     * This function only handles the case of an AggregationNode (COUNT on $COLUMN) on top of an AggregationNode(of non-aggregate on $COLUMN).
+     *
+     * @param nodeBuilder
+     * @param aggregationNode
+     * @param outputColumn
+     * @param aggregation
+     * @return true if push down successfully otherwise false.
+     */
+    private static boolean handlePushDownSingleDistinctCount(ImmutableList.Builder<AggregationColumnNode> nodeBuilder, AggregationNode aggregationNode, VariableReferenceExpression outputColumn, AggregationNode.Aggregation aggregation)
+    {
+        if (aggregation.getCall().getDisplayName().equalsIgnoreCase(COUNT_FUNCTION_NAME)) {
+            List<RowExpression> arguments = aggregation.getCall().getArguments();
+            if (arguments.size() == 1) {
+                RowExpression aggregationArgument = arguments.get(0);
+                // Handle the case of Count Aggregation on top of a Non-Agg GroupBy Aggregation.
+                if (aggregationNode.getSource() instanceof AggregationNode) {
+                    AggregationNode sourceAggregationNode = (AggregationNode) aggregationNode.getSource();
+                    Set<String> sourceAggregationGroupSet = getGroupKeys(sourceAggregationNode.getGroupingKeys());
+                    Set<String> aggregationGroupSet = getGroupKeys(aggregationNode.getGroupingKeys());
+                    aggregationGroupSet.add(aggregationArgument.toString());
+                    if (sourceAggregationGroupSet.containsAll(aggregationGroupSet) && aggregationGroupSet.containsAll(sourceAggregationGroupSet)) {
+                        //(sourceAggregationNode.getGroupingKeys().containsAll(aggregationNode.getGroupingKeys()))
+                        //aggregationArgument.equalsIgnoreCase(sourceAggregationNode.getGroupingKeys().get(0).getName()))
+                        nodeBuilder.add(
+                                new AggregationFunctionColumnNode(
+                                        outputColumn,
+                                        new CallExpression(
+                                                DISTINCT_COUNT_FUNCTION_NAME,
+                                                aggregation.getFunctionHandle(),
+                                                BigintType.BIGINT,
+                                                ImmutableList.of(aggregationArgument))));
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    private static Set<String> getGroupKeys(List<VariableReferenceExpression> groupingKeys)
+    {
+        Set<String> groupKeySet = new HashSet<>();
+        for (VariableReferenceExpression groupingKey : groupingKeys) {
+            groupKeySet.add(groupingKey.getName());
+        }
+        return groupKeySet;
     }
 
     public static LinkedHashMap<VariableReferenceExpression, SortOrder> getOrderingScheme(TopNNode topNNode)

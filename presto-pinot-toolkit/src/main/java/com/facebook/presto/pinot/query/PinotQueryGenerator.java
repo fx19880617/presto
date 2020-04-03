@@ -30,6 +30,7 @@ import com.facebook.presto.spi.function.StandardFunctionResolution;
 import com.facebook.presto.spi.plan.AggregationNode;
 import com.facebook.presto.spi.plan.FilterNode;
 import com.facebook.presto.spi.plan.LimitNode;
+import com.facebook.presto.spi.plan.MarkDistinctNode;
 import com.facebook.presto.spi.plan.PlanNode;
 import com.facebook.presto.spi.plan.PlanVisitor;
 import com.facebook.presto.spi.plan.ProjectNode;
@@ -74,12 +75,15 @@ import static java.util.Objects.requireNonNull;
 public class PinotQueryGenerator
 {
     private static final Logger log = Logger.get(PinotQueryGenerator.class);
-    private static final Map<String, String> UNARY_AGGREGATION_MAP = ImmutableMap.of(
-            "min", "min",
-            "max", "max",
-            "avg", "avg",
-            "sum", "sum",
-            "approx_distinct", "DISTINCTCOUNTHLL");
+    private static final Map<String, String> UNARY_AGGREGATION_MAP =
+            new ImmutableMap.Builder<String, String>()
+                    .put("min", "min")
+                    .put("max", "max")
+                    .put("avg", "avg")
+                    .put("sum", "sum")
+                    .put("distinctcount", "DISTINCTCOUNT")
+                    .put("approx_distinct", "DISTINCTCOUNTHLL")
+                    .build();
 
     private final PinotConfig pinotConfig;
     private final TypeManager typeManager;
@@ -242,6 +246,14 @@ public class PinotQueryGenerator
                 return ((VariableReferenceExpression) expression);
             }
             throw new PinotException(PINOT_UNSUPPORTED_EXPRESSION, Optional.empty(), "Expected a variable reference but got " + expression);
+        }
+
+        @Override
+        public PinotQueryGeneratorContext visitMarkDistinct(MarkDistinctNode node, PinotQueryGeneratorContext context)
+        {
+            context = node.getSource().accept(this, context);
+            requireNonNull(context, "context is null");
+            return context;
         }
 
         @Override

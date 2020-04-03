@@ -31,6 +31,7 @@ import com.facebook.presto.spi.function.StandardFunctionResolution;
 import com.facebook.presto.spi.plan.Assignments;
 import com.facebook.presto.spi.plan.FilterNode;
 import com.facebook.presto.spi.plan.LimitNode;
+import com.facebook.presto.spi.plan.MarkDistinctNode;
 import com.facebook.presto.spi.plan.Ordering;
 import com.facebook.presto.spi.plan.OrderingScheme;
 import com.facebook.presto.spi.plan.PlanNode;
@@ -98,12 +99,16 @@ public class TestPinotQueryBase
 
     protected final PinotConfig pinotConfig = new PinotConfig();
 
-    protected static final Map<VariableReferenceExpression, PinotQueryGeneratorContext.Selection> testInput = ImmutableMap.of(
-            new VariableReferenceExpression("regionid", BIGINT), new PinotQueryGeneratorContext.Selection("regionId", TABLE_COLUMN), // direct column reference
-            new VariableReferenceExpression("city", VARCHAR), new PinotQueryGeneratorContext.Selection("city", TABLE_COLUMN), // direct column reference
-            new VariableReferenceExpression("fare", DOUBLE), new PinotQueryGeneratorContext.Selection("fare", TABLE_COLUMN), // direct column reference
-            new VariableReferenceExpression("totalfare", DOUBLE), new PinotQueryGeneratorContext.Selection("(fare + trip)", DERIVED), // derived column
-            new VariableReferenceExpression("secondssinceepoch", BIGINT), new PinotQueryGeneratorContext.Selection("secondsSinceEpoch", TABLE_COLUMN)); // column for datetime functions
+    protected static final Map<VariableReferenceExpression, PinotQueryGeneratorContext.Selection> testInput =
+            new ImmutableMap.Builder()
+                    .put(new VariableReferenceExpression("regionid", BIGINT), new PinotQueryGeneratorContext.Selection("regionId", TABLE_COLUMN)) // direct column reference
+                    .put(new VariableReferenceExpression("regionid$distinct", BIGINT), new PinotQueryGeneratorContext.Selection("regionId", TABLE_COLUMN)) // distinct column reference
+                    .put(new VariableReferenceExpression("city", VARCHAR), new PinotQueryGeneratorContext.Selection("city", TABLE_COLUMN)) // direct column reference
+                    .put(new VariableReferenceExpression("fare", DOUBLE), new PinotQueryGeneratorContext.Selection("fare", TABLE_COLUMN)) // direct column reference
+                    .put(new VariableReferenceExpression("totalfare", DOUBLE), new PinotQueryGeneratorContext.Selection("(fare + trip)", DERIVED)) // derived column
+                    .put(new VariableReferenceExpression("count_regionid", BIGINT), new PinotQueryGeneratorContext.Selection("count(regionid)", DERIVED))// derived column
+                    .put(new VariableReferenceExpression("secondssinceepoch", BIGINT), new PinotQueryGeneratorContext.Selection("secondsSinceEpoch", TABLE_COLUMN)) // column for datetime functions
+                    .build();
 
     protected final TypeProvider typeProvider = TypeProvider.fromVariables(testInput.keySet());
 
@@ -155,6 +160,11 @@ public class TestPinotQueryBase
                 tableHandle,
                 variables,
                 assignments.build());
+    }
+
+    protected MarkDistinctNode markDistinct(PlanBuilder planBuilder, VariableReferenceExpression markerVariable, List<VariableReferenceExpression> distinctVariables, PlanNode source)
+    {
+        return planBuilder.markDistinct(markerVariable, distinctVariables, source);
     }
 
     protected FilterNode filter(PlanBuilder planBuilder, PlanNode source, RowExpression predicate)

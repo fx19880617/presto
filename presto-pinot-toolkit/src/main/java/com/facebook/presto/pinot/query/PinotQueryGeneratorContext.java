@@ -23,12 +23,14 @@ import com.facebook.presto.spi.relation.VariableReferenceExpression;
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
@@ -37,6 +39,7 @@ import java.util.stream.Collectors;
 
 import static com.facebook.presto.pinot.PinotErrorCode.PINOT_QUERY_GENERATOR_FAILURE;
 import static com.facebook.presto.pinot.PinotErrorCode.PINOT_UNSUPPORTED_EXPRESSION;
+import static com.facebook.presto.pinot.PinotPushdownUtils.DISTINCT_COUNT_FUNCTION_NAME;
 import static com.facebook.presto.pinot.PinotPushdownUtils.checkSupported;
 import static com.google.common.base.MoreObjects.toStringHelper;
 import static java.lang.StrictMath.toIntExact;
@@ -151,7 +154,19 @@ public class PinotQueryGeneratorContext
             Set<VariableReferenceExpression> hiddenColumnSet)
     {
         // there is only one aggregation supported.
-        checkSupported(!hasAggregation(), "Pinot doesn't support aggregation on top of the aggregated data");
+        // checkSupported(!hasAggregation(), "Pinot doesn't support aggregation on top of the aggregated data");
+        // there is only one aggregation supported unless distinct is used.
+        Iterator<Selection> selectionIterator = newSelections.values().iterator();
+        boolean passed = false;
+        while (selectionIterator.hasNext()) {
+            if (selectionIterator.next().getDefinition().startsWith(DISTINCT_COUNT_FUNCTION_NAME.toUpperCase(Locale.ENGLISH))) {
+                hiddenColumnSet = Collections.emptySet();
+                passed = true;
+            }
+        }
+        if (!passed) {
+            checkSupported(!hasAggregation(), "Pinot doesn't support aggregation on top of the aggregated data");
+        }
         checkSupported(!hasLimit(), "Pinot doesn't support aggregation on top of the limit");
         checkSupported(aggregations > 0, "Invalid number of aggregations");
         return new PinotQueryGeneratorContext(newSelections, from, filter, aggregations, groupByColumns, topNColumnOrderingMap, limit, variablesInAggregation, hiddenColumnSet);
@@ -240,6 +255,20 @@ public class PinotQueryGeneratorContext
     private boolean hasOrderBy()
     {
         return !topNColumnOrderingMap.isEmpty();
+    }
+
+    public boolean isNonAggregateGroupBy()
+    {
+        for (VariableReferenceExpression key : this.getSelections().keySet()) {
+            if (this.getHiddenColumnSet().contains(key)) {
+                continue;
+            }
+            Selection selection = this.getSelections().get(key);
+            if (selection.origin != Origin.TABLE_COLUMN) {
+                return false;
+            }
+        }
+        return true;
     }
 
     public LinkedHashMap<VariableReferenceExpression, Selection> getSelections()
