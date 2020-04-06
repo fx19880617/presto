@@ -149,7 +149,7 @@ public class PinotBrokerPageSource
                 type.writeLong(blockBuilder, parseLong(value));
             }
             else if (type instanceof DateType) {
-                type.writeLong(blockBuilder, parseLong(value));
+                blockBuilder.writeInt(parseDouble(value).intValue());
             }
             else {
                 throw new PinotException(PINOT_UNSUPPORTED_COLUMN_TYPE, Optional.empty(), "type '" + type + "' not supported");
