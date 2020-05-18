@@ -42,6 +42,7 @@ import io.airlift.slice.Slices;
 import java.io.IOException;
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -280,8 +281,18 @@ public class PinotBrokerPageSource
 
     private static String asText(JsonNode node)
     {
+        if (node.isNull()) {
+            return null;
+        }
+        if (node.isArray()) {
+            String[] arrayTexts = new String[node.size()];
+            for (int i = 0; i < node.size(); i++) {
+                arrayTexts[i] = asText(node.get(i));
+            }
+            return Arrays.toString(arrayTexts);
+        }
         checkState(node.isValueNode());
-        return node.isNull() ? null : node.asText();
+        return node.asText();
     }
 
     @VisibleForTesting

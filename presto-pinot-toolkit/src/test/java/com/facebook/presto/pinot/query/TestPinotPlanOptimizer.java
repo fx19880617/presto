@@ -208,6 +208,46 @@ public class TestPinotPlanOptimizer
     }
 
     @Test
+    public void testDatePredicatePushdown()
+    {
+        PlanBuilder pb = createPlanBuilder(defaultSessionHolder);
+        FilterNode filter = filter(pb, tableScan(pb, pinotTable, regionId, city, fare, daysSinceEpoch), getRowExpression("dayssinceepoch < DATE '2014-01-31'", defaultSessionHolder));
+        PlanNode originalPlan = limit(pb, 50L, filter);
+        PlanNode optimized = getOptimizedPlan(pb, originalPlan);
+        assertPlanMatch(optimized, PinotTableScanMatcher.match(pinotTable, Optional.of("SELECT regionId, city, fare, daysSinceEpoch FROM hybrid WHERE \\(daysSinceEpoch < 16101\\) LIMIT 50"), Optional.of(false), originalPlan.getOutputVariables()), typeProvider);
+    }
+
+    @Test
+    public void testDateCastingPredicatePushdown()
+    {
+        PlanBuilder pb = createPlanBuilder(defaultSessionHolder);
+        FilterNode filter = filter(pb, tableScan(pb, pinotTable, regionId, city, fare, daysSinceEpoch), getRowExpression("cast(dayssinceepoch as timestamp) < TIMESTAMP '2014-01-31 00:00:00 UTC'", defaultSessionHolder));
+        PlanNode originalPlan = limit(pb, 50L, filter);
+        PlanNode optimized = getOptimizedPlan(pb, originalPlan);
+        assertPlanMatch(optimized, PinotTableScanMatcher.match(pinotTable, Optional.of("SELECT regionId, city, fare, daysSinceEpoch FROM hybrid WHERE \\(daysSinceEpoch < 16101\\) LIMIT 50"), Optional.of(false), originalPlan.getOutputVariables()), typeProvider);
+    }
+
+    @Test
+    public void testTimestampPredicatePushdown()
+    {
+        PlanBuilder pb = createPlanBuilder(defaultSessionHolder);
+        FilterNode filter = filter(pb, tableScan(pb, pinotTable, regionId, city, fare, millisSinceEpoch), getRowExpression("millissinceepoch < TIMESTAMP '2014-01-31 00:00:00 UTC'", defaultSessionHolder));
+        PlanNode originalPlan = limit(pb, 50L, filter);
+        PlanNode optimized = getOptimizedPlan(pb, originalPlan);
+        assertPlanMatch(optimized, PinotTableScanMatcher.match(pinotTable, Optional.of("SELECT regionId, city, fare, millisSinceEpoch FROM hybrid WHERE \\(millisSinceEpoch < 1391126400000\\) LIMIT 50"), Optional.of(false), originalPlan.getOutputVariables()), typeProvider);
+    }
+
+    @Test
+    public void testTimestampCastingPredicatePushdown()
+    {
+        PlanBuilder pb = createPlanBuilder(defaultSessionHolder);
+        FilterNode filter = filter(pb, tableScan(pb, pinotTable, regionId, city, fare, millisSinceEpoch), getRowExpression("cast(millissinceepoch as date) < DATE '2014-01-31'", defaultSessionHolder));
+        PlanNode originalPlan = limit(pb, 50L, filter);
+        PlanNode optimized = getOptimizedPlan(pb, originalPlan);
+        assertPlanMatch(optimized, PinotTableScanMatcher.match(pinotTable, Optional.of("SELECT regionId, city, fare, millisSinceEpoch FROM hybrid WHERE \\(millisSinceEpoch < 1391126400000\\) LIMIT 50"), Optional.of(false), originalPlan.getOutputVariables()), typeProvider);
+    }
+
+    @Test
     public void testUnsupportedPredicatePushdown()
     {
         Map<String, ExpectedValueProvider<FunctionCall>> aggregationsSecond = ImmutableMap.of(

@@ -14,8 +14,14 @@
 package com.facebook.presto.pinot.query;
 
 import com.facebook.presto.common.function.OperatorType;
+import com.facebook.presto.common.type.BigintType;
+import com.facebook.presto.common.type.DateType;
+import com.facebook.presto.common.type.IntegerType;
+import com.facebook.presto.common.type.TimestampType;
+import com.facebook.presto.common.type.TimestampWithTimeZoneType;
 import com.facebook.presto.common.type.Type;
 import com.facebook.presto.common.type.TypeManager;
+import com.facebook.presto.common.type.VarcharType;
 import com.facebook.presto.pinot.PinotException;
 import com.facebook.presto.pinot.query.PinotQueryGeneratorContext.Origin;
 import com.facebook.presto.pinot.query.PinotQueryGeneratorContext.Selection;
@@ -32,10 +38,13 @@ import com.facebook.presto.spi.relation.RowExpressionVisitor;
 import com.facebook.presto.spi.relation.SpecialFormExpression;
 import com.facebook.presto.spi.relation.VariableReferenceExpression;
 import com.google.common.collect.ImmutableSet;
+import org.joda.time.format.DateTimeFormatter;
+import org.joda.time.format.ISODateTimeFormat;
 
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -52,6 +61,8 @@ public class PinotFilterExpressionConverter
         implements RowExpressionVisitor<PinotExpression, Function<VariableReferenceExpression, Selection>>
 {
     private static final Set<String> LOGICAL_BINARY_OPS_FILTER = ImmutableSet.of("=", "<", "<=", ">", ">=", "<>");
+    private static final DateTimeFormatter DATE_FORMATTER = ISODateTimeFormat.date().withZoneUTC();
+
     private final TypeManager typeManager;
     private final FunctionMetadataManager functionMetadataManager;
     private final StandardFunctionResolution standardFunctionResolution;
@@ -89,13 +100,48 @@ public class PinotFilterExpressionConverter
         }
         List<RowExpression> arguments = call.getArguments();
         if (arguments.size() == 2) {
-            return derived(format(
-                    "(%s %s %s)",
-                    arguments.get(0).accept(this, context).getDefinition(),
-                    operator,
-                    arguments.get(1).accept(this, context).getDefinition()));
+            String def0 = arguments.get(0).accept(this, context).getDefinition();
+            String def1 = arguments.get(1).accept(this, context).getDefinition();
+            def1 = handleTimeStampAndDateCast(arguments.get(0), def1);
+            def0 = handleTimeStampAndDateCast(arguments.get(1), def0);
+            return derived(format("(%s %s %s)", def0, operator, def1));
         }
         throw new PinotException(PINOT_UNSUPPORTED_EXPRESSION, Optional.empty(), format("Unknown logical binary: '%s'", call));
+    }
+
+    private String handleTimeStampAndDateCast(RowExpression rowExpression, String definition)
+    {
+        if (!(rowExpression instanceof CallExpression)) {
+            return definition;
+        }
+        CallExpression callExpr = (CallExpression) rowExpression;
+        if (!standardFunctionResolution.isCastFunction(callExpr.getFunctionHandle())) {
+            return definition;
+        }
+        if (callExpr.getArguments().size() != 1) {
+            return definition;
+        }
+        Type inputType = callExpr.getArguments().get(0).getType();
+        Type expectedType = callExpr.getType();
+        if (inputType == DateType.DATE && (expectedType == TimestampType.TIMESTAMP || expectedType == TimestampWithTimeZoneType.TIMESTAMP_WITH_TIME_ZONE)) {
+            try {
+                Long daysSinceEpoch = TimeUnit.MILLISECONDS.toDays(Long.parseLong(definition));
+                return daysSinceEpoch.toString();
+            }
+            catch (Exception e) {
+                throw new PinotException(PINOT_UNSUPPORTED_EXPRESSION, Optional.empty(), format("Unable to parse timestamp string: '%s'", definition));
+            }
+        }
+        if ((inputType == TimestampType.TIMESTAMP || inputType == TimestampWithTimeZoneType.TIMESTAMP_WITH_TIME_ZONE) && expectedType == DateType.DATE) {
+            try {
+                Long millis = TimeUnit.DAYS.toMillis(Long.parseLong(definition));
+                return millis.toString();
+            }
+            catch (Exception e) {
+                throw new PinotException(PINOT_UNSUPPORTED_EXPRESSION, Optional.empty(), format("Unable to parse date string: '%s'", definition));
+            }
+        }
+        return definition;
     }
 
     private PinotExpression handleBetween(
@@ -141,6 +187,21 @@ public class PinotFilterExpressionConverter
             if (typeManager.canCoerce(input.getType(), expectedType)) {
                 return input.accept(this, context);
             }
+            if (expectedType == DateType.DATE) {
+                try {
+                    PinotExpression expression = input.accept(this, context);
+                    if (input.getType() == TimestampType.TIMESTAMP || input.getType() == TimestampWithTimeZoneType.TIMESTAMP_WITH_TIME_ZONE) {
+                        return expression;
+                    }
+                    if (input.getType() == VarcharType.VARCHAR) {
+                        Integer daysSinceEpoch = (int) TimeUnit.MILLISECONDS.toDays(DATE_FORMATTER.parseMillis(expression.getDefinition().substring(1, expression.getDefinition().length() - 1)));
+                        return new PinotExpression(daysSinceEpoch.toString(), expression.getOrigin());
+                    }
+                }
+                catch (Exception e) {
+                    throw new PinotException(PINOT_UNSUPPORTED_EXPRESSION, Optional.empty(), "Cast date value expression is not supported: " + cast);
+                }
+            }
             throw new PinotException(PINOT_UNSUPPORTED_EXPRESSION, Optional.empty(), "Non implicit casts not supported: " + cast);
         }
 
@@ -171,7 +232,24 @@ public class PinotFilterExpressionConverter
                 return handleLogicalBinary(operatorType.getOperator(), call, context);
             }
         }
+        if (functionMetadata.getName().getFunctionName().equalsIgnoreCase("$literal$timestamp") ||
+                    functionMetadata.getName().getFunctionName().equalsIgnoreCase("$literal$date")) {
+            return handleDateAndTimestamp(call, context);
+        }
         throw new PinotException(PINOT_UNSUPPORTED_EXPRESSION, Optional.empty(), format("function %s not supported in filter", call));
+    }
+
+    private PinotExpression handleDateAndTimestamp(CallExpression timestamp, Function<VariableReferenceExpression, Selection> context)
+    {
+        if (timestamp.getArguments().size() == 1) {
+            RowExpression input = timestamp.getArguments().get(0);
+            Type expectedType = timestamp.getType();
+            if (typeManager.canCoerce(input.getType(), expectedType) || input.getType() == BigintType.BIGINT || input.getType() == IntegerType.INTEGER) {
+                return input.accept(this, context);
+            }
+            throw new PinotException(PINOT_UNSUPPORTED_EXPRESSION, Optional.empty(), "Non implicit Date/Timestamp Literal is not supported: " + timestamp);
+        }
+        throw new PinotException(PINOT_UNSUPPORTED_EXPRESSION, Optional.empty(), format("The Date/Timestamp Literal is not supported. Received: %s", timestamp));
     }
 
     @Override
