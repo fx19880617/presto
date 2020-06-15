@@ -43,6 +43,7 @@ import static com.facebook.presto.common.type.VarcharType.VARCHAR;
 import static com.facebook.presto.pinot.PinotErrorCode.PINOT_EXCEPTION;
 import static com.facebook.presto.pinot.PinotErrorCode.PINOT_INSUFFICIENT_SERVER_RESPONSE;
 import static com.facebook.presto.pinot.PinotErrorCode.PINOT_INVALID_PQL_GENERATED;
+import static com.facebook.presto.pinot.PinotErrorCode.PINOT_RETRIABLE_EXCEPTION;
 import static com.facebook.presto.pinot.PinotErrorCode.PINOT_UNCLASSIFIED_ERROR;
 import static com.facebook.presto.pinot.PinotErrorCode.PINOT_UNSUPPORTED_COLUMN_TYPE;
 import static com.google.common.base.Preconditions.checkArgument;
@@ -94,7 +95,7 @@ public class PinotSegmentPageSource
                 .collect(Collectors.toList());
     }
 
-    private static void checkExceptions(DataTable dataTable, PinotSplit split)
+    private static void checkExceptions(DataTable dataTable, PinotSplit split, boolean retryPinotException)
     {
         Map<String, String> metadata = dataTable.getMetadata();
         List<String> exceptions = new ArrayList<>();
@@ -104,6 +105,12 @@ public class PinotSegmentPageSource
             }
         });
         if (!exceptions.isEmpty()) {
+            if (retryPinotException) {
+                throw new PinotException(
+                    PINOT_RETRIABLE_EXCEPTION,
+                    split.getSegmentPql(),
+                    String.format("Encountered %d retriable pinot exceptions for split %s: %s", exceptions.size(), split, exceptions));
+            }
             throw new PinotException(
                     PINOT_EXCEPTION,
                     split.getSegmentPql(),
@@ -211,7 +218,7 @@ public class PinotSegmentPageSource
                     .filter(table -> table != null && table.getNumberOfRows() > 0)
                     .forEach(dataTable ->
                     {
-                        checkExceptions(dataTable, split);
+                        checkExceptions(dataTable, split, this.pinotConfig.isRetryPinotException());
                         // Store each dataTable which will later be constructed into Pages.
                         // Also update estimatedMemoryUsage, mostly represented by the size of all dataTables, using numberOfRows and fieldTypes combined as an estimate
                         int estimatedTableSizeInBytes = IntStream.rangeClosed(0, dataTable.getDataSchema().size() - 1)

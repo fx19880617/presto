@@ -36,6 +36,7 @@ public class PinotSessionProperties
     private static final String FORBID_BROKER_QUERIES = "forbid_broker_queries";
     private static final String IGNORE_EMPTY_RESPONSES = "ignore_empty_responses";
     private static final String RETRY_COUNT = "retry_count";
+    private static final String RETRY_PINOT_EXCEPTION = "retry_pinot_exception";
     private static final String USE_DATE_TRUNC = "use_date_trunc";
     private static final String NON_AGGREGATE_LIMIT_FOR_BROKER_QUERIES = "non_aggregate_limit_for_broker_queries";
 
@@ -78,6 +79,11 @@ public class PinotSessionProperties
         return session.getProperty(RETRY_COUNT, Integer.class);
     }
 
+    public static boolean getRetryPinotException(ConnectorSession session)
+    {
+        return session.getProperty(RETRY_PINOT_EXCEPTION, Boolean.class);
+    }
+
     public static boolean isUseDateTruncation(ConnectorSession session)
     {
         return session.getProperty(USE_DATE_TRUNC, Boolean.class);
@@ -111,6 +117,10 @@ public class PinotSessionProperties
                         RETRY_COUNT,
                         "Retry count for retriable pinot data fetch calls",
                         pinotConfig.getFetchRetryCount(),
+                        false),
+                booleanProperty(RETRY_PINOT_EXCEPTION,
+                        "Retry Pinot query exception",
+                        pinotConfig.isRetryPinotException(),
                         false),
                 integerProperty(
                         NON_AGGREGATE_LIMIT_FOR_BROKER_QUERIES,

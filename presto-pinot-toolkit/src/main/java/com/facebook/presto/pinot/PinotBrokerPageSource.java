@@ -53,6 +53,7 @@ import java.util.stream.Collectors;
 import static com.facebook.presto.pinot.PinotErrorCode.PINOT_DECODE_ERROR;
 import static com.facebook.presto.pinot.PinotErrorCode.PINOT_EXCEPTION;
 import static com.facebook.presto.pinot.PinotErrorCode.PINOT_INSUFFICIENT_SERVER_RESPONSE;
+import static com.facebook.presto.pinot.PinotErrorCode.PINOT_RETRIABLE_EXCEPTION;
 import static com.facebook.presto.pinot.PinotErrorCode.PINOT_UNEXPECTED_RESPONSE;
 import static com.facebook.presto.pinot.PinotErrorCode.PINOT_UNSUPPORTED_COLUMN_TYPE;
 import static com.facebook.presto.pinot.PinotUtils.doWithRetries;
@@ -326,6 +327,12 @@ public class PinotBrokerPageSource
         if (exceptions != null && exceptions.isArray() && exceptions.size() > 0) {
             // Pinot is known to return exceptions with benign errorcodes like 200
             // so we treat any exception as an error
+            if (this.pinotConfig.isRetryPinotException()) {
+                throw new PinotException(
+                    PINOT_RETRIABLE_EXCEPTION,
+                    Optional.of(pql),
+                    String.format("Query %s encountered retriable exception %s", pql, exceptions.get(0)));
+            }
             throw new PinotException(
                     PINOT_EXCEPTION,
                     Optional.of(pql),
