@@ -25,7 +25,6 @@ import com.facebook.presto.spi.PrestoException;
 import com.google.common.collect.ImmutableMap;
 import io.airlift.slice.Slice;
 import io.airlift.slice.Slices;
-import org.apache.pinot.common.response.ServerInstance;
 import org.apache.pinot.common.utils.DataSchema.ColumnDataType;
 import org.apache.pinot.common.utils.DataTable;
 
@@ -50,7 +49,6 @@ import static com.facebook.presto.pinot.PinotErrorCode.PINOT_UNSUPPORTED_COLUMN_
 import static com.google.common.base.Preconditions.checkArgument;
 import static io.airlift.slice.Slices.utf8Slice;
 import static java.util.Objects.requireNonNull;
-import static org.apache.pinot.common.utils.DataSchema.ColumnDataType.LONG_ARRAY;
 
 /**
  * This class retrieves Pinot data from a Pinot client, and re-constructs the data into Presto Pages.
@@ -208,7 +206,7 @@ public class PinotSegmentPageSource
     {
         long startTimeNanos = System.nanoTime();
         try {
-            Map<ServerInstance, DataTable> dataTableMap = queryPinot(session, split);
+            Map<ServerInstanceWrapper, DataTable> dataTableMap = queryPinot(session, split);
             dataTableMap.values().stream()
                     // ignore empty tables and tables with 0 rows
                     .filter(table -> table != null && table.getNumberOfRows() > 0)
@@ -231,7 +229,7 @@ public class PinotSegmentPageSource
         }
     }
 
-    private Map<ServerInstance, DataTable> queryPinot(ConnectorSession session, PinotSplit split)
+    private Map<ServerInstanceWrapper, DataTable> queryPinot(ConnectorSession session, PinotSplit split)
     {
         String pql = split.getSegmentPql().orElseThrow(() -> new PinotException(PINOT_INVALID_PQL_GENERATED, Optional.empty(), "Expected the segment split to contain the pql"));
         String host = split.getSegmentHost().orElseThrow(() -> new PinotException(PINOT_INVALID_PQL_GENERATED, Optional.empty(), "Expected the segment split to contain the host"));
