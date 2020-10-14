@@ -30,7 +30,7 @@ import com.google.common.cache.LoadingCache;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.net.HttpHeaders;
-import org.apache.pinot.common.data.Schema;
+import org.apache.pinot.spi.data.Schema;
 
 import javax.inject.Inject;
 
@@ -57,7 +57,7 @@ import static com.facebook.presto.pinot.PinotErrorCode.PINOT_UNEXPECTED_RESPONSE
 import static com.google.common.base.MoreObjects.toStringHelper;
 import static java.lang.String.format;
 import static java.util.Objects.requireNonNull;
-import static org.apache.pinot.common.config.TableNameBuilder.extractRawTableName;
+import static org.apache.pinot.spi.utils.builder.TableNameBuilder.extractRawTableName;
 
 public class PinotClusterInfoFetcher
 {

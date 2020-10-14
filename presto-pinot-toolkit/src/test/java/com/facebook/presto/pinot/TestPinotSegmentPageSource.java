@@ -26,12 +26,12 @@ import com.facebook.presto.testing.assertions.Assert;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
-import org.apache.pinot.common.data.DimensionFieldSpec;
-import org.apache.pinot.common.data.FieldSpec;
 import org.apache.pinot.common.response.ProcessingException;
-import org.apache.pinot.common.response.ServerInstance;
 import org.apache.pinot.common.utils.DataSchema;
 import org.apache.pinot.common.utils.DataTable;
+import org.apache.pinot.spi.data.DimensionFieldSpec;
+import org.apache.pinot.spi.data.FieldSpec;
+import org.apache.pinot.spi.utils.ByteArray;
 import org.testng.annotations.Test;
 
 import java.util.Arrays;
@@ -196,6 +196,12 @@ public class TestPinotSegmentPageSource
         }
 
         @Override
+        public ByteArray getBytes(int rowIndex, int colIndex)
+        {
+            return getBytes(rowIndex, colIndex);
+        }
+
+        @Override
         public <T> T getObject(int rowIndex, int columnIndex)
         {
             return (T) get(rowIndex, columnIndex);
@@ -321,11 +327,11 @@ public class TestPinotSegmentPageSource
         }
 
         @Override
-        public Map<ServerInstance, DataTable> queryPinotServerForDataTable(String pql, String serverHost, List<String> segments, long connectionTimeoutInMillis, boolean ignoreEmptyResponses, int pinotRetryCount)
+        public Map<ServerInstanceWrapper, DataTable> queryPinotServerForDataTable(String pql, String serverHost, List<String> segments, long connectionTimeoutInMillis, boolean ignoreEmptyResponses, int pinotRetryCount)
         {
-            ImmutableMap.Builder<ServerInstance, DataTable> response = ImmutableMap.builder();
+            ImmutableMap.Builder<ServerInstanceWrapper, DataTable> response = ImmutableMap.builder();
             for (int i = 0; i < dataTables.size(); ++i) {
-                response.put(new ServerInstance(String.format("localhost:%d", i + 9000)), dataTables.get(i));
+                response.put(new ServerInstanceWrapper(String.format("localhost:%d", i + 9000)), dataTables.get(i));
             }
             return response.build();
         }

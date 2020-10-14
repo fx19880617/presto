@@ -16,7 +16,7 @@ package com.facebook.presto.pinot;
 import com.facebook.airlift.http.client.testing.TestingHttpClient;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import org.apache.pinot.common.data.Schema;
+import org.apache.pinot.spi.data.Schema;
 
 import java.util.List;
 import java.util.Map;
