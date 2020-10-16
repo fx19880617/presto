@@ -13,6 +13,7 @@
  */
 package com.facebook.presto.pinot;
 
+import com.facebook.presto.pinot.grpc.PinotStreamingQueryClient;
 import com.facebook.presto.spi.ColumnHandle;
 import com.facebook.presto.spi.ConnectorId;
 import com.facebook.presto.spi.ConnectorPageSource;
@@ -38,6 +39,7 @@ public class PinotPageSourceProvider
     private final String connectorId;
     private final PinotConfig pinotConfig;
     private final PinotScatterGatherQueryClient pinotQueryClient;
+    private final PinotStreamingQueryClient pinotStreamingQueryClient;
     private final PinotClusterInfoFetcher clusterInfoFetcher;
     private final ObjectMapper objectMapper;
 
@@ -56,6 +58,9 @@ public class PinotPageSourceProvider
                 pinotConfig.getMinConnectionsPerServer(),
                 pinotConfig.getMaxBacklogPerServer(),
                 pinotConfig.getMaxConnectionsPerServer()));
+        this.pinotStreamingQueryClient = new PinotStreamingQueryClient(new PinotStreamingQueryClient.Config(
+                pinotConfig.getStreamingServerGrpcMaxInboundMessageSize(),
+                true));
         this.clusterInfoFetcher = requireNonNull(clusterInfoFetcher, "cluster info fetcher is null");
         this.objectMapper = requireNonNull(objectMapper, "object mapper is null");
     }
@@ -81,12 +86,23 @@ public class PinotPageSourceProvider
 
         switch (pinotSplit.getSplitType()) {
             case SEGMENT:
-                return new PinotSegmentPageSource(
+                if (this.pinotConfig.isUseStreamingForSegmentQueries() &&
+                        pinotSplit.getGrpcPort().orElse(-1) > 0) {
+                    return new PinotSegmentStreamingPageSource(
+                        session,
+                        this.pinotConfig,
+                        this.pinotStreamingQueryClient,
+                        pinotSplit,
+                        handles);
+                }
+                else {
+                    return new PinotSegmentPageSource(
                         session,
                         this.pinotConfig,
                         this.pinotQueryClient,
                         pinotSplit,
                         handles);
+                }
             case BROKER:
                 switch (pinotSplit.getBrokerPinotQuery().get().getFormat()) {
                     case SQL:

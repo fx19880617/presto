@@ -38,6 +38,7 @@ public class PinotConfig
     public static final int DEFAULT_MIN_CONNECTIONS_PER_SERVER = 10;
     public static final int DEFAULT_THREAD_POOL_SIZE = 30;
     public static final int DEFAULT_NON_AGGREGATE_LIMIT_FOR_BROKER_QUERIES = 25_000;
+    public static final int DEFAULT_STREAMING_SERVER_GRPC_MAX_INBOUND_MESSAGE_SIZE = 128 * 1024 * 1024;
 
     // There is a perf penalty of having a large topN since the structures are allocated to this size
     // So size this judiciously
@@ -86,6 +87,9 @@ public class PinotConfig
 
     // Requires Pinot version >= 0.4.0.
     private boolean usePinotSqlForBrokerQueries = true;
+    // Requires Pinot version >= 0.6.0.
+    private boolean useStreamingForSegmentQueries;
+    private int streamingServerGrpcMaxInboundMessageSize = DEFAULT_STREAMING_SERVER_GRPC_MAX_INBOUND_MESSAGE_SIZE;
 
     private int numSegmentsPerSplit = 1;
     private boolean ignoreEmptyResponses;
@@ -488,6 +492,30 @@ public class PinotConfig
     public PinotConfig setPushdownTopNBrokerQueries(boolean pushdownTopNBrokerQueries)
     {
         this.pushdownTopNBrokerQueries = pushdownTopNBrokerQueries;
+        return this;
+    }
+
+    public boolean isUseStreamingForSegmentQueries()
+    {
+        return useStreamingForSegmentQueries;
+    }
+
+    @Config("pinot.use-streaming-for-segment-queries")
+    public PinotConfig setUseStreamingForSegmentQueries(boolean useStreamingForSegmentQueries)
+    {
+        this.useStreamingForSegmentQueries = useStreamingForSegmentQueries;
+        return this;
+    }
+
+    public int getStreamingServerGrpcMaxInboundMessageSize()
+    {
+        return streamingServerGrpcMaxInboundMessageSize;
+    }
+
+    @Config("pinot.streaming-server-grpc-max-inbound-message-size")
+    public PinotConfig setStreamingServerGrpcMaxInboundMessageSize(int streamingServerGrpcMaxInboundMessageSize)
+    {
+        this.streamingServerGrpcMaxInboundMessageSize = streamingServerGrpcMaxInboundMessageSize;
         return this;
     }
 }

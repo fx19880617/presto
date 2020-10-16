@@ -25,7 +25,6 @@ import com.facebook.presto.common.type.VarbinaryType;
 import com.facebook.presto.common.type.VarcharType;
 import org.apache.pinot.spi.data.DateTimeFieldSpec;
 import org.apache.pinot.spi.data.FieldSpec;
-import org.apache.pinot.spi.data.FieldSpec.DataType;
 import org.apache.pinot.spi.data.Schema;
 import org.apache.pinot.spi.data.TimeFieldSpec;
 import org.apache.pinot.spi.data.TimeGranularitySpec;
@@ -37,7 +36,7 @@ import static com.facebook.presto.pinot.PinotErrorCode.PINOT_UNSUPPORTED_COLUMN_
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static java.util.concurrent.TimeUnit.DAYS;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
-import static org.apache.pinot.spi.data.TimeGranularitySpec.TimeFormat.EPOCH;
+import static org.apache.pinot.spi.data.DateTimeFieldSpec.TimeFormat.EPOCH;
 
 public class PinotColumnUtils
 {
@@ -112,7 +111,7 @@ public class PinotColumnUtils
         return new ArrayType(getPrestoTypeFromPinotType(field.getDataType()));
     }
 
-    public static Type getPrestoTypeFromPinotType(DataType dataType)
+    public static Type getPrestoTypeFromPinotType(FieldSpec.DataType dataType)
     {
         switch (dataType) {
             case BOOLEAN:

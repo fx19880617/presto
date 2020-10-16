@@ -110,4 +110,9 @@ public class PinotConnection
     {
         return pinotClusterInfoFetcher.getTimeBoundaryForTable(tableName);
     }
+
+    public int getGrpcPort(String serverInstance)
+    {
+        return pinotClusterInfoFetcher.getGrpcPort(serverInstance);
+    }
 }
